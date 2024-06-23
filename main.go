@@ -1,14 +1,15 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 )
 
 type Config struct {
@@ -23,18 +24,33 @@ func main() {
 	}
 	defer file.Close()
 
-	bytes, err := ioutil.ReadAll(file)
-	if err != nil {
-		log.Fatalf("Error reading config file: %v", err)
-	}
-
 	var config Config
-	if err := json.Unmarshal(bytes, &config); err != nil {
+	if err := json.NewDecoder(file).Decode(&config); err != nil {
 		log.Fatalf("Error parsing config file: %v", err)
 	}
 
+	// SSL/TLS設定の準備
+	rootCertPool := x509.NewCertPool()
+	pem, err := os.ReadFile("global-bundle.pem")
+	if err != nil {
+		log.Fatalf("Failed to read CA cert: %v", err)
+	}
+	if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
+		log.Fatalf("Failed to append PEM.")
+	}
+
+	tlsConfig := &tls.Config{
+		RootCAs: rootCertPool,
+	}
+
+	// TLS設定を登録
+	tlsConfigName := "custom-tls"
+	if err := mysql.RegisterTLSConfig(tlsConfigName, tlsConfig); err != nil {
+		log.Fatal(err)
+	}
+
 	// データベースに接続
-	db, err := sql.Open("mysql", config.DSN)
+	db, err := sql.Open("mysql", config.DSN+"&tls="+tlsConfigName)
 	if err != nil {
 		log.Fatal(err)
 	}
